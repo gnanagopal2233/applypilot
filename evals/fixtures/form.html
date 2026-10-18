@@ -1,0 +1,18 @@
+<!doctype html><html><body>
+<h1>Apply: Forward Deployed Engineer</h1>
+<form onsubmit="event.preventDefault(); document.body.innerHTML='<h2>Thank you for applying!</h2>'">
+  <label for="fn">First Name *</label><input id="fn" required>
+  <label for="ln">Last Name *</label><input id="ln" required>
+  <label for="em">Email *</label><input id="em" type="email" required>
+  <label for="ph">Phone</label><input id="ph" type="tel">
+  <label for="cv">Resume/CV *</label><input id="cv" type="file" required>
+  <label for="li">LinkedIn Profile</label><input id="li">
+  <label for="sp">Will you now or in the future require sponsorship? *</label>
+  <select id="sp" required><option>Select...</option><option>Yes</option><option>No</option></select>
+  <fieldset><legend>Are you willing to relocate? *</legend>
+    <label><input type="radio" name="reloc" value="y" required> Yes</label>
+    <label><input type="radio" name="reloc" value="n"> No</label></fieldset>
+  <label for="why">Why are you interested in this role? *</label><textarea id="why" required></textarea>
+  <label><input type="checkbox" id="cert" required> I certify that the information provided is accurate *</label>
+  <button type="submit">Submit Application</button>
+</form></body></html>
