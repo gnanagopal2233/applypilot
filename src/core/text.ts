@@ -36,6 +36,25 @@ export function containsTerm(haystack: string, term: string): boolean {
   return new RegExp(`(^|[^a-z0-9])${esc}($|[^a-z0-9+#])`, "i").test(haystack.toLowerCase());
 }
 
+export function bannedIn(text: string, terms: string[]): string[] {
+  return terms.filter((t) => containsTerm(text, t));
+}
+
+/** Remove sentences that contain any of the terms. */
+export function dropSentencesWith(text: string, terms: string[]): string {
+  if (!terms.length) return text;
+  return text
+    .split(/\n{2,}/)
+    .map((para) =>
+      para
+        .split(/(?<=[.!?])\s+/)
+        .filter((s) => !terms.some((t) => containsTerm(s, t)))
+        .join(" "),
+    )
+    .filter((p) => p.trim())
+    .join("\n\n");
+}
+
 /** Numbers/metrics in a string, normalised: "1,000+" -> "1000", "~40%" -> "40%", "$30K" -> "30k". */
 export function extractNumbers(text: string): string[] {
   const out: string[] = [];

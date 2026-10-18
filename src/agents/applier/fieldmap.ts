@@ -15,7 +15,7 @@ export type Resolved = FieldPlan & { apId: string };
 const norm = (s: string) => s.toLowerCase().replace(/\s+/g, " ").trim();
 
 /** Rule-based mapping of common ATS fields to profile values. */
-export function standardValue(label: string, type: string, ws: Workspace, job: { company: string; title: string }): { value: string; source: FieldPlan["source"] } | null {
+export function standardValue(label: string, type: string, ws: Workspace, job: { company: string; title: string }, name?: string): { value: string; source: FieldPlan["source"] } | null {
   const l = norm(label);
   const id = ws.profile.identity;
   const current = ws.experience.roles[0];
@@ -34,8 +34,9 @@ export function standardValue(label: string, type: string, ws: Workspace, job: {
     [/current (job )?title|^title$/, () => current.title],
   ];
   if (type === "file") {
-    if (/resume|cv/.test(l)) return { value: "@resume", source: "resume" };
-    if (/cover/.test(l)) return { value: "@cover_letter", source: "cover_letter" };
+    const hay = `${l} ${(name ?? "").toLowerCase()}`; // Greenhouse labels file inputs "Attach"; the id says resume/cover_letter
+    if (/resume|\bcv\b/.test(hay)) return { value: "@resume", source: "resume" };
+    if (/cover/.test(hay)) return { value: "@cover_letter", source: "cover_letter" };
     return null;
   }
   if (/cover letter/.test(l) && type === "textarea") return { value: "@cover_letter_text", source: "cover_letter" };
@@ -90,7 +91,7 @@ export function resolveDeterministic(fields: FieldDescriptor[], ws: Workspace, j
       resolved.push({ ...base, source: "none", confidence: 0 });
       continue;
     }
-    const std = standardValue(f.label, f.type, ws, job) ?? (() => {
+    const std = standardValue(f.label, f.type, ws, job, f.name) ?? (() => {
       const a = answerBankValue(f.label, ws);
       return a ? { value: a, source: "answers" as const } : null;
     })();

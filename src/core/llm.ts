@@ -87,8 +87,33 @@ class OpenAICompatLLM implements LLM {
   }
 }
 
+/**
+ * Offline mock for demos and tests (LLM_PROVIDER=mock). Deterministic, never invents:
+ * it keeps source bullets verbatim and leaves free-text form questions unanswered.
+ */
+class MockLLM implements LLM {
+  readonly name = "mock";
+  async json<T>({ name, prompt, schema }: Parameters<LLM["json"]>[0] & { schema: z.ZodType<T> }): Promise<T> {
+    let out: unknown;
+    if (name === "ping") out = { ok: true };
+    else if (name === "job_fit") out = { roleFit: 8, skillsFit: 8, seniorityFit: 7, domainFit: 7, mustHaveGaps: [], strengths: ["mock"], summary: "Mock score (no model configured)." };
+    else if (name === "tailored_resume") {
+      const roles = [...prompt.matchAll(/<role id="([^"]+)"[^>]*>([\s\S]*?)<\/role>/g)].map((m) => ({
+        roleId: m[1],
+        bullets: [...m[2].matchAll(/\[([^\]]+)\] (.+)/g)].slice(0, 3).map((b) => ({ sourceId: b[1], text: b[2].trim() })),
+      }));
+      const summary = prompt.match(/<candidate_summary>\n([^\n]+)/)?.[1] ?? "";
+      const company = prompt.match(/Company: (.+)/)?.[1] ?? "your team";
+      out = { headline: prompt.match(/Headline: (.+)/)?.[1] ?? "", summary, roles, skillsPriority: [], coverLetter: `I am applying to ${company}.\n\nMy experience is summarized in the attached resume.` };
+    } else if (name === "entailment") out = { results: [...prompt.matchAll(/sourceId="([^"]+)"/g)].map((m) => ({ sourceId: m[1], supported: true })) };
+    else if (name === "form_answers") out = { answers: [...prompt.matchAll(/"apId":"([^"]+)"/g)].map((m) => ({ apId: m[1], answer: null, confidence: 0 })) };
+    return schema.parse(out);
+  }
+}
+
 export function getLLM(): LLM {
   const provider = (process.env.LLM_PROVIDER || "anthropic").toLowerCase();
+  if (provider === "mock") return new MockLLM();
   const model = process.env.LLM_MODEL || (provider === "anthropic" ? "claude-sonnet-4-5" : provider === "openai" ? "gpt-4.1" : "llama3.1");
   if (provider === "anthropic") {
     if (!process.env.ANTHROPIC_API_KEY) throw new Error("ANTHROPIC_API_KEY is not set (see .env.example)");

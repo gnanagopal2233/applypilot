@@ -30,6 +30,12 @@ export const ProfileSchema = z.object({
     skipIfNoSponsorship: z.boolean().default(false),
     maxPostingAgeDays: z.number().default(30),
   }),
+  style: z
+    .object({
+      // Words that must never appear in anything generated for an application (resume, cover letter, form answers).
+      bannedTerms: z.array(z.string()).default([]),
+    })
+    .default({ bannedTerms: [] }),
   automation: z
     .object({
       autoSubmit: z.boolean().default(false),

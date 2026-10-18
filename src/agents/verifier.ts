@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { skillVocabulary, type Workspace } from "../core/config";
 import type { LLM } from "../core/llm";
-import { containsTerm, extractNumbers } from "../core/text";
+import { bannedIn, containsTerm, dropSentencesWith, extractNumbers } from "../core/text";
 import type { TailoredResume, VerifyIssue, VerifyResult } from "../core/types";
 
 /**
@@ -96,6 +96,24 @@ export function verifyDeterministic(t: TailoredResume, ws: Workspace): { resume:
       if (field === "summary") resume.summary = ws.experience.summaries[0];
       else if (field === "headline") resume.headline = ws.profile.headline;
       else resume.coverLetter = dropSentences(text, [...nums, ...terms]);
+    }
+  }
+  // Style rule: banned terms never ship.
+  const banned = ws.profile.style.bannedTerms;
+  if (banned.length) {
+    for (const role of resume.roles) {
+      role.bullets = role.bullets.filter((b) => {
+        const hit = bannedIn(b.text, banned);
+        if (hit.length) issues.push({ where: `bullet:${b.sourceId}`, kind: "unsupported", detail: `contains banned term(s) ${hit.join(", ")} — removed`, repaired: true });
+        return !hit.length;
+      });
+    }
+    for (const field of ["headline", "summary", "coverLetter"] as const) {
+      const hit = bannedIn(resume[field], banned);
+      if (hit.length) {
+        issues.push({ where: field, kind: "unsupported", detail: `contains banned term(s) ${hit.join(", ")} — sentences removed`, repaired: true });
+        resume[field] = field === "headline" ? resume[field].split(/\s*[·|,]\s*/).filter((p) => !bannedIn(p, banned).length).join(" · ") : dropSentencesWith(resume[field], banned);
+      }
     }
   }
   return { resume, issues, checked };

@@ -3,11 +3,14 @@ import { getJob, jobEvents } from "../../../src/core/db";
 import { loadWorkspace } from "../../../src/core/config";
 import { resumeHtml } from "../../../src/render/resume";
 import type { FieldPlan, GateDecision, ScoreResult, TailoredResume, VerifyResult } from "../../../src/core/types";
+import { jobAction } from "../../actions";
+import Flash from "../../components/Flash";
 
 export const dynamic = "force-dynamic";
 
-export default async function JobPage({ params }: { params: Promise<{ id: string }> }) {
+export default async function JobPage({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: Promise<{ msg?: string; error?: string }> }) {
   const { id: raw } = await params;
+  const { msg, error } = await searchParams;
   const id = decodeURIComponent(raw);
   const job = getJob(id);
   if (!job) notFound();
@@ -24,10 +27,10 @@ export default async function JobPage({ params }: { params: Promise<{ id: string
     preview = null;
   }
   const events = jobEvents(id);
-  const action = `/api/jobs/${encodeURIComponent(id)}/action`;
 
   return (
     <>
+      <Flash msg={msg} error={error} />
       <div className="panel">
         <div style={{ display: "flex", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
           <div>
@@ -44,13 +47,33 @@ export default async function JobPage({ params }: { params: Promise<{ id: string
             <div className="muted">fit score</div>
           </div>
         </div>
-        <form method="post" action={action} className="actions" style={{ marginTop: 12 }}>
-          <button className="primary" name="action" value="approve">Approve → submit on next run</button>
+        <form action={jobAction} className="actions" style={{ marginTop: 12 }}>
+          <input type="hidden" name="id" value={id} />
+          <button name="action" value="tailor" className={tailored ? "" : "primary"}>
+            {tailored ? "Re-tailor" : "Tailor resume + cover letter"}
+          </button>
+          <button name="action" value="apply" className={tailored ? "primary" : ""} title="Runs the confidence gate. Submits only if every check passes (and dry run is off).">
+            Apply now
+          </button>
+          <button name="action" value="apply_browser" title="Opens a browser window on this computer, fills the form, and waits for you to press Submit.">
+            Fill form in browser (I submit)
+          </button>
+          <button name="action" value="approve">Approve</button>
           <button name="action" value="skip">Skip</button>
           <button name="action" value="reset">Re-queue</button>
           {job.pdf_path ? (
-            <a href={`/api/jobs/${encodeURIComponent(id)}/resume`} target="_blank">
-              <button type="button">Download tailored PDF</button>
+            <a className="btn" href={`/api/jobs/${encodeURIComponent(id)}/resume`} target="_blank">
+              Resume PDF
+            </a>
+          ) : null}
+          {job.pdf_path ? (
+            <a className="btn" href={`/api/jobs/${encodeURIComponent(id)}/file?name=cover-letter.pdf`} target="_blank">
+              Cover letter PDF
+            </a>
+          ) : null}
+          {apply ? (
+            <a className="btn" href={`/api/jobs/${encodeURIComponent(id)}/file?name=form.png`} target="_blank">
+              Form screenshot
             </a>
           ) : null}
         </form>
@@ -58,7 +81,7 @@ export default async function JobPage({ params }: { params: Promise<{ id: string
 
       <div className="grid2">
         <div className="panel">
-          <h2>scorer</h2>
+          <h2>fit</h2>
           {score ? (
             <>
               {score.llm ? (
@@ -88,7 +111,7 @@ export default async function JobPage({ params }: { params: Promise<{ id: string
         </div>
 
         <div className="panel">
-          <h2>verifier + gate</h2>
+          <h2>claim check + decision</h2>
           {verify ? (
             <>
               <p className={verify.issues.length ? "warn" : "ok"}>

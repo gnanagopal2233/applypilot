@@ -1,7 +1,7 @@
 import { skillVocabulary, type Workspace } from "../core/config";
 import type { Embedder, LLM } from "../core/llm";
 import { hybridSearch } from "../core/retrieval";
-import { containsTerm } from "../core/text";
+import { bannedIn, containsTerm } from "../core/text";
 import { TailorLLMSchema, type JobPosting, type TailoredResume } from "../core/types";
 
 /**
@@ -40,7 +40,9 @@ export async function tailorResume(job: JobPosting, ws: Workspace, llm: LLM, emb
 
   const out = await llm.json({
     name: "tailored_resume",
-    system: SYSTEM,
+    system: ws.profile.style.bannedTerms.length
+      ? `${SYSTEM}\n8. NEVER use these words or phrases anywhere (not in headline, summary, bullets or cover letter): ${ws.profile.style.bannedTerms.map((t) => `"${t}"`).join(", ")}.`
+      : SYSTEM,
     schema: TailorLLMSchema,
     maxTokens: 5000,
     prompt: `<job>\nTitle: ${job.title}\nCompany: ${job.company}\n\n${job.description.slice(0, 10000)}\n</job>\n\n<candidate_summary>\n${ws.experience.summaries.join("\n")}\nHeadline: ${ws.profile.headline}\n</candidate_summary>\n\n<evidence>\n${evidenceText}\n</evidence>\n\n<candidate_skills>${vocab.join(", ")}</candidate_skills>\n\nProduce the tailored resume.`,
@@ -59,12 +61,17 @@ export async function tailorResume(job: JobPosting, ws: Workspace, llm: LLM, emb
     const i = prio.findIndex((p) => p.toLowerCase() === s.toLowerCase());
     return i < 0 ? 999 : i;
   };
-  const skills = Object.fromEntries(Object.entries(ws.experience.skills).map(([cat, list]) => [cat, [...list].sort((a, b) => rankOf(a) - rankOf(b))]));
+  const banned = ws.profile.style.bannedTerms;
+  const skills = Object.fromEntries(
+    Object.entries(ws.experience.skills)
+      .map(([cat, list]) => [cat, list.filter((s) => !bannedIn(s, banned).length).sort((a, b) => rankOf(a) - rankOf(b))] as const)
+      .filter(([cat, list]) => list.length && !bannedIn(cat, banned).length),
+  );
   const catScore = (list: string[]) => Math.min(...list.map(rankOf));
   const orderedSkills = Object.fromEntries(Object.entries(skills).sort((a, b) => catScore(a[1]) - catScore(b[1])));
 
   // Projects: keep those relevant to the JD first.
-  const projects = [...ws.experience.projects].sort(
+  const projects = [...ws.experience.projects].filter((p) => !bannedIn(`${p.name} ${p.text}`, banned).length).sort(
     (a, b) => b.skills.filter((s) => containsTerm(job.description, s)).length - a.skills.filter((s) => containsTerm(job.description, s)).length,
   );
 
@@ -75,7 +82,7 @@ export async function tailorResume(job: JobPosting, ws: Workspace, llm: LLM, emb
     skills: orderedSkills,
     projects,
     education: ws.experience.education,
-    certifications: ws.experience.certifications,
+    certifications: ws.experience.certifications.filter((c) => !bannedIn(c, banned).length),
     coverLetter: out.coverLetter,
   };
 }

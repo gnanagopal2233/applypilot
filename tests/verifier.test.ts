@@ -50,3 +50,21 @@ describe("verifier (deterministic)", () => {
     expect(r.resume.roles[0].title).toBe("Software Engineer");
   });
 });
+
+describe("style: banned terms", () => {
+  it("strips banned words from summary, cover letter and bullets", () => {
+    const w = structuredClone(ws);
+    w.profile.style.bannedTerms = ["AI"];
+    const r = verifyDeterministic(
+      resume({ sourceId: "acme.2", text: ws.experience.roles[0].bullets[1].text }, { summary: ws.experience.summaries[0], coverLetter: "I build grounded tools for customers. I love AI products.\n\nI ship fast." }),
+      w,
+    );
+    expect(r.resume.coverLetter).not.toMatch(/\bAI\b/);
+    expect(r.resume.coverLetter).toContain("I ship fast.");
+  });
+  it("does not match AI inside other words", async () => {
+    const { bannedIn } = await import("../src/core/text");
+    expect(bannedIn("maintain domain training", ["AI"])).toEqual([]);
+    expect(bannedIn("Built AI-powered search", ["AI"])).toEqual(["AI"]);
+  });
+});

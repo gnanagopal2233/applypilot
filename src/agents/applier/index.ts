@@ -4,7 +4,7 @@ import { z } from "zod";
 import type { Workspace } from "../../core/config";
 import { BM25 } from "../../core/retrieval";
 import type { LLM } from "../../core/llm";
-import { extractNumbers } from "../../core/text";
+import { bannedIn, extractNumbers } from "../../core/text";
 import type { JobPosting } from "../../core/types";
 import { allBankText } from "../verifier";
 import { pickOption, resolveDeterministic, type FieldDescriptor, type Resolved } from "./fieldmap";
@@ -55,10 +55,17 @@ const COLLECT_FIELDS = `(() => {
     return (l2 && l2.innerText) || el.placeholder || el.name || '';
   };
   const seenGroups = new Set();
+  const rawLabelOverride = new Map();
   document.querySelectorAll('input, textarea, select').forEach((el) => {
     const type = el.tagName === 'SELECT' ? 'select' : el.tagName === 'TEXTAREA' ? 'textarea' : (el.getAttribute('role') === 'combobox' ? 'combobox' : (el.type || 'text'));
     if (['hidden', 'submit', 'button', 'search', 'image', 'reset'].includes(type)) return;
     if (!vis(el) && type !== 'file') return;
+    // Skip helper inputs that custom dropdown widgets (react-select etc.) render without a label.
+    const rawLabel = labelOf(el).trim();
+    const rect = el.getBoundingClientRect();
+    if (type !== 'file' && el.tabIndex < 0 && (rect.width <= 4 || rect.height <= 4 || getComputedStyle(el).opacity === '0')) return;
+    if (!rawLabel && (el.tabIndex < 0 || el.getAttribute('aria-hidden') === 'true' || /requiredInput|dummy|hidden/i.test(el.className) || el.getBoundingClientRect().width <= 4)) return;
+    if (!rawLabel && !el.id && !el.name) return;
     const required = el.required || el.getAttribute('aria-required') === 'true' || /\\*\\s*$/.test(labelOf(el).trim());
     if (type === 'radio' || type === 'checkbox') {
       const group = el.name || el.id;
@@ -75,8 +82,9 @@ const COLLECT_FIELDS = `(() => {
     }
     const id = 'ap' + (n++);
     el.setAttribute('data-ap-id', id);
+    if (type === 'file' && /^(attach|upload|choose file)?$/i.test(rawLabel)) rawLabelOverride.set(el, ((el.id || el.name || 'file').replace(/[_-]+/g, ' ')));
     const options = type === 'select' ? [...el.options].map(o => o.text.trim()).filter(t => t && !/^select|^--|^please/i.test(t)) : (type === 'checkbox' ? [labelOf(el).trim()] : []);
-    out.push({ apId: id, label: labelOf(el).trim().replace(/\\s+/g, ' ').slice(0, 300), type, required, options, name: el.name || undefined });
+    out.push({ apId: id, label: (rawLabelOverride.get(el) || labelOf(el)).trim().replace(/\\s+/g, ' ').replace(/\\s*\\*\\s*$/, '').slice(0, 300), type, required, options, name: [el.id, el.name].filter(Boolean).join(' ') || undefined });
   });
   return out;
 })()`;
@@ -95,6 +103,8 @@ async function resolveWithLlm(pending: FieldDescriptor[], job: JobPosting, ws: W
     `Work authorization: authorized=${ws.profile.workAuth.authorizedUS}, sponsorship now=${ws.profile.workAuth.needsSponsorshipNow}, future=${ws.profile.workAuth.needsSponsorshipFuture}`,
     `Summary: ${ws.experience.summaries[0]}`,
     ...ws.experience.roles.map((r) => `${r.title} @ ${r.company} ${r.start}-${r.end}: ${r.bullets.map((b) => b.text).join(" ")}`),
+    `Education: ${ws.experience.education.map((e) => `${e.degree}, ${e.school} (${e.dates ?? ""})`).join("; ")}`,
+    `Skills: ${Object.values(ws.experience.skills).flat().join(", ")}`,
   ].join("\n");
   const out = await llm.json({
     name: "form_answers",
@@ -104,7 +114,9 @@ async function resolveWithLlm(pending: FieldDescriptor[], job: JobPosting, ws: W
 - If the facts do not determine the answer (personal/legal questions, salary not given, dates not given, anything you'd have to guess), return answer=null.
 - For fields with options, the answer MUST be one of the options verbatim.
 - Free-text motivation questions ("Why X?"): 2-4 sentences grounded in the facts and the job; no invented numbers or tools; confidence <= 0.85.
-- confidence = your probability the answer is correct AND appropriate to submit without human review.`,
+- confidence = your probability the answer is correct AND appropriate to submit without human review.${
+      ws.profile.style.bannedTerms.length ? `\n- NEVER use these words: ${ws.profile.style.bannedTerms.join(", ")}.` : ""
+    }`,
     prompt: `<job>${job.title} at ${job.company}\n${job.description.slice(0, 4000)}</job>\n<facts>\n${facts}\n</facts>\n<fields>\n${pending
       .map((f) => {
         const hints = bm.search(f.label, 2).map((h) => ws.answers.answers[Number(h.id)].answer);
@@ -124,7 +136,25 @@ async function resolveWithLlm(pending: FieldDescriptor[], job: JobPosting, ws: W
       value = pick;
     }
     if (extractNumbers(value).some((n) => !bankNums.has(n))) confidence = Math.min(confidence, 0.5); // invented number
+    if (bannedIn(value, ws.profile.style.bannedTerms).length) confidence = Math.min(confidence, 0.4); // style rule
     return { apId: f.apId, label: f.label, required: f.required, type: f.type, value, source: "llm", confidence };
+  });
+}
+
+/**
+ * A CAPTCHA the user would have to solve (visible checkbox widget or challenge frame).
+ * Invisible, score-based badges are not challenges. We never try to solve or evade one:
+ * if a challenge is visible the application goes to the human review queue.
+ */
+async function visibleChallenge(page: import("playwright").Page): Promise<boolean> {
+  return page.evaluate(() => {
+    const frames = [...document.querySelectorAll('iframe[src*="recaptcha"], iframe[src*="hcaptcha"], iframe[src*="turnstile"], iframe[src*="challenges.cloudflare"]')] as HTMLIFrameElement[];
+    return frames.some((f) => {
+      const r = f.getBoundingClientRect();
+      const s = getComputedStyle(f);
+      const invisibleBadge = /size=invisible/.test(f.src) || !!f.closest(".grecaptcha-badge");
+      return !invisibleBadge && r.width > 50 && r.height > 50 && s.visibility !== "hidden" && s.display !== "none" && s.opacity !== "0";
+    });
   });
 }
 
@@ -177,7 +207,7 @@ export async function runApplication(job: JobPosting, ws: Workspace, opts: Apply
       }
     }
 
-    const captcha = (await page.locator('iframe[src*="recaptcha"], iframe[src*="hcaptcha"], iframe[src*="turnstile"], .g-recaptcha, [data-sitekey]').count()) > 0;
+    const captcha = await visibleChallenge(page);
     await page.screenshot({ path: shot, fullPage: true });
 
     if (opts.submit && allowSubmit(fields, captcha)) {
@@ -189,7 +219,15 @@ export async function runApplication(job: JobPosting, ws: Workspace, opts: Apply
         .textContent({ timeout: 25_000 })
         .catch(() => null);
       await page.screenshot({ path: path.join(opts.outDir, "after-submit.png"), fullPage: true });
-      return { fields, captcha, submitted: !!confirmation, confirmation: confirmation ?? undefined, screenshot: shot, error: confirmation ? undefined : "no confirmation detected after submit" };
+      const challenged = !confirmation && (await visibleChallenge(page));
+      return {
+        fields,
+        captcha: captcha || challenged,
+        submitted: !!confirmation,
+        confirmation: confirmation ?? undefined,
+        screenshot: shot,
+        error: confirmation ? undefined : challenged ? "site asked for a CAPTCHA after submit — finish it yourself (apply in browser)" : "no confirmation detected after submit",
+      };
     }
 
     if (!opts.headless && opts.holdForHumanMs) {

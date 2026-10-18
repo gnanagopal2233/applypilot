@@ -26,20 +26,28 @@ Most auto-apply bots optimise for volume. They scrape LinkedIn, fill forms with 
 | Runs fail silently for weeks | `doctor` checks the setup, every run is traced, and failures post to a webhook. |
 | Spam volume | Daily cap, cap per company per 30 days, and a score threshold to auto-submit. |
 
-## Quick start
+## Quick start (web app)
 
 ```bash
 git clone https://github.com/<you>/applypilot && cd applypilot
 npm install
 npx playwright install chromium
-npm run cli init          # copies examples/profile/* -> profile/ (gitignored) and .env
-# edit profile/*.yaml and add your API key to .env
-npm run doctor            # validates profile, key, browser, and every job board
-npm run pipeline          # scout -> score -> tailor -> verify -> gate -> apply
-npm run dev               # dashboard at http://localhost:3000
+npm run app               # builds and serves http://localhost:3000
 ```
 
-Start with `automation.dryRun: true`. It fills forms and stops, so you can look at the screenshots and form plans in the dashboard. Once you trust it, set `autoSubmit: true` and `dryRun: false`.
+On Windows you can just run **`start.ps1`**. It installs everything the first time, then opens the app.
+
+The rest happens in the browser:
+
+1. **Settings** → *Create my profile files*. Edit your profile, experience bank, saved answers and target companies in place. Every save is validated.
+2. **Settings → Language model**: pick Anthropic, OpenAI or a local Ollama model and paste your key. It's stored only in your local `.env`. Use `LLM_PROVIDER=mock` for an offline demo.
+3. **Settings → Run checks**: checks your profile, key, browser and every company board.
+4. **Pipeline** → *Run full pipeline* (or paste a job URL). Work runs in the background, and the page updates live.
+5. Open any job to see its fit score, the claim check, the form plan with a confidence for each field, the tailored resume and cover letter, and the trace. From there you can **Tailor**, **Apply now**, **Fill form in browser (I submit)**, **Approve** or **Skip**.
+
+Start with `automation.dryRun: true`. It fills forms and stops, so you can look at the screenshots and form plans first. Once you trust it, set `autoSubmit: true` and `dryRun: false`.
+
+`style.bannedTerms` in `profile.yaml` lists words that must never appear in anything generated. Matching skills and certifications are hidden too.
 
 ## Your profile (gitignored)
 
@@ -54,7 +62,9 @@ Start with `automation.dryRun: true`. It fills forms and stops, so you can look 
 
 | Command | What it does |
 |---|---|
-| `npm run pipeline` | Full run |
+| `npm run app` | Web app (build and start) |
+| `npm run dev` | Web app in dev mode |
+| `npm run pipeline` | Full run from the terminal |
 | `npm run worker` | Scheduled runs (`CRON` in `.env`, default weekdays at 9:05) |
 | `npm run cli add <url>` | Add and score one posting |
 | `npm run cli tailor <id>` | Tailored resume and cover letter PDFs plus a verifier report |

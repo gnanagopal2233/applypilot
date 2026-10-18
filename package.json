@@ -18,7 +18,8 @@
     "eval": "tsx evals/run.ts",
     "smoke": "tsx evals/smoke.ts",
     "test": "vitest run",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "app": "next build && next start -p 3000"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.135.0",
